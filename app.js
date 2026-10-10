@@ -1,5 +1,5 @@
 /* Kitchen Hub — Supabase edition */
-const APP_VERSION="4 (recipes + sides)";
+const APP_VERSION="5 (meal search)";
 const LOCS=["Fridge","Fridge Door","Pantry","Spice Cabinet","Kitchen Freezer","Deep Freezer"];
 const CATS=["Proteins","Vegetables","Fruit","Dairy & Eggs","Grains & Starches","Bread & Baked","Frozen Meals & Convenience","Canned & Jarred","Sauces & Condiments","Oils & Vinegars","Spices & Seasonings","Baking","Snacks","Desserts","Drinks","Other"];
 const ST=["In stock","Low","Out"];
@@ -13,7 +13,7 @@ const byName=(a,b)=>a.name.localeCompare(b.name);
 
 let sb=null, phase="loading", userEmail="";
 let items=[], extras=[], meals=[], loaded={items:false,extras:false,meals:false};
-let tab="inv", loc="All", q="", needOnly=false, mealConfirm=null, mealType="Dinner";
+let mq="", tab="inv", loc="All", q="", needOnly=false, mealConfirm=null, mealType="Dinner";
 try{const s=JSON.parse(localStorage.getItem("kh-ui")||"{}");if(s.tab)tab=s.tab;if(s.loc)loc=s.loc;if(MEALTYPES.includes(s.mealType))mealType=s.mealType;}catch(e){}
 function saveUI(){try{localStorage.setItem("kh-ui",JSON.stringify({tab,loc,mealType}))}catch(e){}}
 
@@ -114,15 +114,19 @@ function renderShop(){
 
 function renderDin(){
   let body;const lc=mealType.toLowerCase();
-  const shown=meals.filter(m=>mType(m)===mealType);
+  const terms=mq.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const hay=m=>[m.name,m.uses,m.ingredients,m.kids,m.adults,m.recipe_source].join(" ").toLowerCase();
+  const searching=terms.length>0;
+  const shown=searching?meals.filter(m=>{const h=hay(m);return terms.every(t=>h.includes(t))}):meals.filter(m=>mType(m)===mealType);
   const chips=MEALTYPES.map(t=>`<button class="chip" data-mealtype="${esc(t)}" aria-pressed="${t===mealType}">${esc(t)} <span style="opacity:.6">${meals.filter(m=>mType(m)===t).length}</span></button>`).join("");
   if(!loaded.meals)body=`<div class="empty"><strong>Loading meals…</strong></div>`;
-  else if(!shown.length)body=`<div class="empty"><strong>No ${lc} ideas saved yet</strong>Tap “Add ${lc}” to start the list.</div>`;
+  else if(!shown.length)body=searching?`<div class="empty"><strong>No meals match “${esc(mq.trim())}”</strong>Try a different word, like an ingredient or part of the name.</div>`:`<div class="empty"><strong>No ${lc} ideas saved yet</strong>Tap “Add ${lc}” to start the list.</div>`;
   else body=`<div class="meals">${[...shown].sort((a,b)=>(a.order??999)-(b.order??999)||a.name.localeCompare(b.name)).map(m=>`
-    <article class="meal"><h3>${esc(m.name)}</h3><dl class="plate">
+    <article class="meal">${searching?`<span class="sect">${esc(mType(m))}</span>`:""}<h3>${esc(m.name)}</h3><dl class="plate">
       ${m.kids?`<dt>Kids</dt><dd>${esc(m.kids)}</dd>`:""}${m.adults?`<dt>Adults</dt><dd>${esc(m.adults)}</dd>`:""}${m.uses?`<dt>Uses</dt><dd>${esc(m.uses)}</dd>`:""}</dl>
       <div class="acts">${mealConfirm===m.id?`<button class="link" data-mealcancel>Keep</button><button class="btn danger" data-mealdel="${esc(m.id)}">Delete meal</button>`:`${hasRecipe(m)?`<button class="btn ghost" data-recipe="${esc(m.id)}" style="margin-right:auto">View recipe</button>`:""}<button class="link" data-mealedit="${esc(m.id)}">Edit</button><button class="link" data-mealask="${esc(m.id)}">Delete</button>`}</div></article>`).join("")}</div>`;
-  view.innerHTML=`<div class="tools"><div class="chips">${chips}</div>${items.length?`<button class="btn ghost" data-copystock>Need ideas? Copy in-stock list for Claude</button>`:""}</div><p class="hint" style="margin-top:6px">Kids get each part separately on a divided plate; adults have it combined.</p>${body}`;
+  view.innerHTML=`<div class="tools"><input class="search" id="mealSearch" type="search" placeholder="Search all ${meals.length||""} meals and recipes" value="${esc(mq)}" autocomplete="off">
+    ${searching?`<p class="hint" style="margin:0">${shown.length} match${shown.length===1?"":"es"} across all sections</p>`:`<div class="chips">${chips}</div>`}${items.length?`<button class="btn ghost" data-copystock>Need ideas? Copy in-stock list for Claude</button>`:""}</div><p class="hint" style="margin-top:6px">Kids get each part separately on a divided plate; adults have it combined.</p>${body}`;
 }
 
 /* ---------- copy in-stock list ---------- */
@@ -179,7 +183,8 @@ function recipeSheet(m){
 .recipe .src{margin:0;color:var(--muted)}
 .recipe ul,.recipe ol{margin:0;padding-left:1.3em;display:grid;gap:6px;font-size:1.05rem}
 .recipe ol li::marker{font-weight:700;color:var(--accent)}
-.recipe a.btn{text-align:center;text-decoration:none}`;document.head.appendChild(st)})();
+.recipe a.btn{text-align:center;text-decoration:none}
+.meal .sect{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);font-weight:700}`;document.head.appendChild(st)})();
 
 /* ---------- sheets ---------- */
 const val=id=>document.getElementById(id).value;
@@ -259,7 +264,9 @@ view.addEventListener("click",async e=>{
   if("mealcancel" in t.dataset){mealConfirm=null;render();return}
   if(t.dataset.mealdel){await api.delMeal(t.dataset.mealdel);mealConfirm=null;render();return}
 });
-view.addEventListener("input",e=>{if(e.target.id==="search"){q=e.target.value;const pos=e.target.selectionStart;render();const s=document.getElementById("search");s.focus();try{s.setSelectionRange(pos,pos)}catch(_){}}});
+view.addEventListener("input",e=>{const id=e.target.id;if(id!=="search"&&id!=="mealSearch")return;
+  if(id==="search")q=e.target.value;else{mq=e.target.value;mealConfirm=null}
+  const pos=e.target.selectionStart;render();const s=document.getElementById(id);if(s){s.focus();try{s.setSelectionRange(pos,pos)}catch(_){}}});
 view.addEventListener("submit",async e=>{
   e.preventDefault();
   if(e.target.id==="extraForm"){const name=val("extraName").trim();if(!name)return;
