@@ -2,7 +2,7 @@
 const LOCS=["Fridge","Fridge Door","Pantry","Spice Cabinet","Kitchen Freezer","Deep Freezer"];
 const CATS=["Proteins","Vegetables","Fruit","Dairy & Eggs","Grains & Starches","Bread & Baked","Frozen Meals & Convenience","Canned & Jarred","Sauces & Condiments","Oils & Vinegars","Spices & Seasonings","Baking","Snacks","Desserts","Drinks","Other"];
 const ST=["In stock","Low","Out"];
-const MEALTYPES=["Breakfast","Lunch","Dinner"];
+const MEALTYPES=["Breakfast","Lunch","Dinner","Dessert"];
 const T={items:"kh_items",extras:"kh_extras",meals:"kh_meals"};
 const stClass=s=>s==="Low"?"s-low":s==="Out"?"s-out":"s-in";
 const mType=m=>MEALTYPES.includes(m.type)?m.type:"Dinner";
