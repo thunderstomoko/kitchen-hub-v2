@@ -1,9 +1,9 @@
 /* Kitchen Hub — Supabase edition */
-const APP_VERSION="3 (desserts + copy list)";
+const APP_VERSION="4 (recipes + sides)";
 const LOCS=["Fridge","Fridge Door","Pantry","Spice Cabinet","Kitchen Freezer","Deep Freezer"];
 const CATS=["Proteins","Vegetables","Fruit","Dairy & Eggs","Grains & Starches","Bread & Baked","Frozen Meals & Convenience","Canned & Jarred","Sauces & Condiments","Oils & Vinegars","Spices & Seasonings","Baking","Snacks","Desserts","Drinks","Other"];
 const ST=["In stock","Low","Out"];
-const MEALTYPES=["Breakfast","Lunch","Dinner","Dessert"];
+const MEALTYPES=["Breakfast","Lunch","Dinner","Dessert","Sides & Extras"];
 const T={items:"kh_items",extras:"kh_extras",meals:"kh_meals"};
 const stClass=s=>s==="Low"?"s-low":s==="Out"?"s-out":"s-in";
 const mType=m=>MEALTYPES.includes(m.type)?m.type:"Dinner";
@@ -115,13 +115,13 @@ function renderShop(){
 function renderDin(){
   let body;const lc=mealType.toLowerCase();
   const shown=meals.filter(m=>mType(m)===mealType);
-  const chips=MEALTYPES.map(t=>`<button class="chip" data-mealtype="${t}" aria-pressed="${t===mealType}">${t} <span style="opacity:.6">${meals.filter(m=>mType(m)===t).length}</span></button>`).join("");
+  const chips=MEALTYPES.map(t=>`<button class="chip" data-mealtype="${esc(t)}" aria-pressed="${t===mealType}">${esc(t)} <span style="opacity:.6">${meals.filter(m=>mType(m)===t).length}</span></button>`).join("");
   if(!loaded.meals)body=`<div class="empty"><strong>Loading meals…</strong></div>`;
   else if(!shown.length)body=`<div class="empty"><strong>No ${lc} ideas saved yet</strong>Tap “Add ${lc}” to start the list.</div>`;
   else body=`<div class="meals">${[...shown].sort((a,b)=>(a.order??999)-(b.order??999)||a.name.localeCompare(b.name)).map(m=>`
     <article class="meal"><h3>${esc(m.name)}</h3><dl class="plate">
       ${m.kids?`<dt>Kids</dt><dd>${esc(m.kids)}</dd>`:""}${m.adults?`<dt>Adults</dt><dd>${esc(m.adults)}</dd>`:""}${m.uses?`<dt>Uses</dt><dd>${esc(m.uses)}</dd>`:""}</dl>
-      <div class="acts">${mealConfirm===m.id?`<button class="link" data-mealcancel>Keep</button><button class="btn danger" data-mealdel="${esc(m.id)}">Delete meal</button>`:`<button class="link" data-mealedit="${esc(m.id)}">Edit</button><button class="link" data-mealask="${esc(m.id)}">Delete</button>`}</div></article>`).join("")}</div>`;
+      <div class="acts">${mealConfirm===m.id?`<button class="link" data-mealcancel>Keep</button><button class="btn danger" data-mealdel="${esc(m.id)}">Delete meal</button>`:`${hasRecipe(m)?`<button class="btn ghost" data-recipe="${esc(m.id)}" style="margin-right:auto">View recipe</button>`:""}<button class="link" data-mealedit="${esc(m.id)}">Edit</button><button class="link" data-mealask="${esc(m.id)}">Delete</button>`}</div></article>`).join("")}</div>`;
   view.innerHTML=`<div class="tools"><div class="chips">${chips}</div>${items.length?`<button class="btn ghost" data-copystock>Need ideas? Copy in-stock list for Claude</button>`:""}</div><p class="hint" style="margin-top:6px">Kids get each part separately on a divided plate; adults have it combined.</p>${body}`;
 }
 
@@ -147,6 +147,39 @@ async function copyStock(){
     const ta=document.getElementById("stockText");ta.focus();ta.select();
   }
 }
+
+/* ---------- recipes ---------- */
+const hasRecipe=m=>!!(m.recipe_url||m.recipe_source||m.ingredients||m.steps);
+const lines=t=>String(t||"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+let wakeLock=null;
+async function keepAwake(on){
+  try{if(on&&navigator.wakeLock&&!wakeLock){wakeLock=await navigator.wakeLock.request("screen")}else if(!on&&wakeLock){await wakeLock.release();wakeLock=null}}catch(e){wakeLock=null}
+}
+function recipeSheet(m){
+  const ing=lines(m.ingredients), steps=lines(m.steps).map(x=>x.replace(/^\d+[.)]\s*/,""));
+  host.innerHTML=`<div class="sheet-bg" id="bg"><div class="sheet recipe" role="dialog" aria-label="${esc(m.name)} recipe">
+    <h2>${esc(m.name)}</h2>
+    ${m.recipe_source?`<p class="src">From ${esc(m.recipe_source)}</p>`:""}
+    ${m.recipe_url?`<a class="btn ghost" href="${esc(m.recipe_url)}" target="_blank" rel="noopener">Open recipe link</a>`:""}
+    ${ing.length?`<h3>Ingredients</h3><ul>${ing.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
+    ${steps.length?`<h3>Steps</h3><ol>${steps.map(x=>`<li>${esc(x)}</li>`).join("")}</ol>`:""}
+    ${(m.kids||m.adults)?`<h3>Plating</h3><dl class="plate">${m.kids?`<dt>Kids</dt><dd>${esc(m.kids)}</dd>`:""}${m.adults?`<dt>Adults</dt><dd>${esc(m.adults)}</dd>`:""}</dl>`:""}
+    <p class="hint" style="margin:0">Your screen stays on while this is open.</p>
+    <div class="acts"><button type="button" class="link" id="editRecipe">Edit</button><div class="right"><button type="button" class="btn" id="cancel">Done</button></div></div>
+  </div></div>`;
+  const close=()=>{keepAwake(false);closeSheet()};
+  document.getElementById("cancel").onclick=close;
+  document.getElementById("bg").addEventListener("click",e=>{if(e.target.id==="bg")close()});
+  document.getElementById("editRecipe").onclick=()=>{keepAwake(false);mealSheet(m)};
+  keepAwake(true);
+}
+(()=>{const st=document.createElement("style");st.textContent=`
+.recipe h3,.recipe-h{font-family:var(--display);font-size:1rem;margin:6px 0 0}
+.recipe-h span,.field .sub{font-family:var(--body);font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0}
+.recipe .src{margin:0;color:var(--muted)}
+.recipe ul,.recipe ol{margin:0;padding-left:1.3em;display:grid;gap:6px;font-size:1.05rem}
+.recipe ol li::marker{font-weight:700;color:var(--accent)}
+.recipe a.btn{text-align:center;text-decoration:none}`;document.head.appendChild(st)})();
 
 /* ---------- sheets ---------- */
 const val=id=>document.getElementById(id).value;
@@ -185,16 +218,22 @@ function mealSheet(m){
   host.innerHTML=`<div class="sheet-bg" id="bg"><form class="sheet" id="mealForm" role="dialog" aria-label="${isNew?"Add meal":"Edit meal"}">
     <h2>${isNew?"Add "+mt.toLowerCase():"Edit meal"}</h2>
     <div class="two"><div class="field"><label for="m-name">Meal</label><input id="m-name" required value="${esc(m.name)}" placeholder="e.g. Pork chop night"></div>
-    <div class="field"><label for="m-type">Section</label><select id="m-type">${MEALTYPES.map(t=>`<option ${t===mt?"selected":""}>${t}</option>`).join("")}</select></div></div>
+    <div class="field"><label for="m-type">Section</label><select id="m-type">${MEALTYPES.map(t=>`<option ${t===mt?"selected":""}>${esc(t)}</option>`).join("")}</select></div></div>
     <div class="field"><label for="m-kids">Kids' plate</label><textarea id="m-kids" rows="2" placeholder="What goes on the divided plate">${esc(m.kids)}</textarea></div>
     <div class="field"><label for="m-adults">Adults</label><textarea id="m-adults" rows="2" placeholder="Sauces, add-ons, how you eat it">${esc(m.adults)}</textarea></div>
     <div class="field"><label for="m-uses">Uses from the kitchen</label><input id="m-uses" value="${esc(m.uses)}" placeholder="e.g. pork chops, Shake 'n Bake, rice"></div>
+    <h3 class="recipe-h">Recipe <span>(optional)</span></h3>
+    <div class="field"><label for="m-url">Link to recipe</label><input id="m-url" type="text" inputmode="url" autocapitalize="off" autocorrect="off" value="${esc(m.recipe_url)}" placeholder="https://…"></div>
+    <div class="field"><label for="m-source">Book or source</label><input id="m-source" value="${esc(m.recipe_source)}" placeholder="e.g. Family recipe book, Grandma's"></div>
+    <div class="field"><label for="m-ing">Ingredients <span class="sub">one per line</span></label><textarea id="m-ing" rows="5" placeholder="2 lbs chicken breast&#10;1 cup rice">${esc(m.ingredients)}</textarea></div>
+    <div class="field"><label for="m-steps">Steps <span class="sub">one per line</span></label><textarea id="m-steps" rows="6" placeholder="Preheat oven to 400°F&#10;Season the chicken">${esc(m.steps)}</textarea></div>
     <div class="acts"><div class="right"><button type="button" class="btn ghost" id="cancel">Cancel</button><button type="submit" class="btn">${isNew?"Add":"Save"}</button></div></div>
   </form></div>`;
   document.getElementById("bg").addEventListener("click",e=>{if(e.target.id==="bg")closeSheet()});
   document.getElementById("cancel").onclick=closeSheet;
   document.getElementById("mealForm").onsubmit=async e=>{e.preventDefault();
-    const data={name:val("m-name").trim(),type:val("m-type"),kids:val("m-kids").trim(),adults:val("m-adults").trim(),uses:val("m-uses").trim(),sort_order:m.order??(meals.length+1)};
+    let url=val("m-url").trim();if(url&&!/^https?:\/\//i.test(url))url="https://"+url;
+    const data={name:val("m-name").trim(),type:val("m-type"),kids:val("m-kids").trim(),adults:val("m-adults").trim(),uses:val("m-uses").trim(),recipe_url:url,recipe_source:val("m-source").trim(),ingredients:val("m-ing").trim(),steps:val("m-steps").trim(),sort_order:m.order??(meals.length+1)};
     if(!data.name)return;
     if(await(isNew?api.addMeal(data):api.saveMeal(m.id,data)))closeSheet()};
 }
@@ -214,6 +253,7 @@ view.addEventListener("click",async e=>{
   if(t.dataset.cycle){const it=items.find(i=>i.id===t.dataset.cycle);if(!it)return;await api.setStatus(it.id,ST[(ST.indexOf(it.status||"In stock")+1)%3]);return}
   if(t.dataset.buy){t.disabled=true;
     if(t.dataset.kind==="item")await api.setStatus(t.dataset.buy,"In stock");else await api.delExtra(t.dataset.buy);return}
+  if(t.dataset.recipe){recipeSheet(meals.find(m=>m.id===t.dataset.recipe));return}
   if(t.dataset.mealedit){mealSheet(meals.find(m=>m.id===t.dataset.mealedit));return}
   if(t.dataset.mealask){mealConfirm=t.dataset.mealask;render();return}
   if("mealcancel" in t.dataset){mealConfirm=null;render();return}
