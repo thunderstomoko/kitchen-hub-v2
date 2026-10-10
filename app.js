@@ -1,4 +1,5 @@
 /* Kitchen Hub — Supabase edition */
+const APP_VERSION="3 (desserts + copy list)";
 const LOCS=["Fridge","Fridge Door","Pantry","Spice Cabinet","Kitchen Freezer","Deep Freezer"];
 const CATS=["Proteins","Vegetables","Fruit","Dairy & Eggs","Grains & Starches","Bread & Baked","Frozen Meals & Convenience","Canned & Jarred","Sauces & Condiments","Oils & Vinegars","Spices & Seasonings","Baking","Snacks","Desserts","Drinks","Other"];
 const ST=["In stock","Low","Out"];
@@ -95,6 +96,7 @@ function renderInv(){
       <button class="pill ${stClass(i.status)}" data-cycle="${esc(i.id)}" aria-label="${esc(i.name)}: ${esc(i.status||"In stock")}. Tap to change.">${esc(i.status||"In stock")}</button></div>`).join("")}</div></section>`).join("");
   }
   view.innerHTML=`<div class="tools"><input class="search" id="search" type="search" placeholder="Search ${items.length||""} items" value="${esc(q)}" autocomplete="off">
+    ${items.length?`<button class="btn ghost" data-copystock>Copy in-stock list for recipes</button>`:""}
     <div class="chips">${chips}<button class="chip" id="needOnly" aria-pressed="${needOnly}">Low or out only</button></div></div>${body}
     ${loaded.items&&items.length?`<p class="hint">Tap a status to switch it between In stock, Low and Out. Low and Out items go on the shopping list.</p>`:""}`;
 }
@@ -120,7 +122,30 @@ function renderDin(){
     <article class="meal"><h3>${esc(m.name)}</h3><dl class="plate">
       ${m.kids?`<dt>Kids</dt><dd>${esc(m.kids)}</dd>`:""}${m.adults?`<dt>Adults</dt><dd>${esc(m.adults)}</dd>`:""}${m.uses?`<dt>Uses</dt><dd>${esc(m.uses)}</dd>`:""}</dl>
       <div class="acts">${mealConfirm===m.id?`<button class="link" data-mealcancel>Keep</button><button class="btn danger" data-mealdel="${esc(m.id)}">Delete meal</button>`:`<button class="link" data-mealedit="${esc(m.id)}">Edit</button><button class="link" data-mealask="${esc(m.id)}">Delete</button>`}</div></article>`).join("")}</div>`;
-  view.innerHTML=`<div class="tools"><div class="chips">${chips}</div></div><p class="hint" style="margin-top:6px">Kids get each part separately on a divided plate; adults have it combined.</p>${body}`;
+  view.innerHTML=`<div class="tools"><div class="chips">${chips}</div>${items.length?`<button class="btn ghost" data-copystock>Need ideas? Copy in-stock list for Claude</button>`:""}</div><p class="hint" style="margin-top:6px">Kids get each part separately on a divided plate; adults have it combined.</p>${body}`;
+}
+
+/* ---------- copy in-stock list ---------- */
+function stockText(){
+  const have=items.filter(i=>i.status!=="Out");
+  const groups={};have.forEach(i=>{const c=CATS.includes(i.category)?i.category:"Other";(groups[c]=groups[c]||[]).push(i)});
+  const lines=CATS.filter(c=>groups[c]).map(c=>`${c}: ${groups[c].sort(byName).map(i=>i.name+(i.status==="Low"?" (running low)":"")+(i.qty?` [${i.qty}]`:"")).join(", ")}`);
+  return [`What we have in our kitchen (${new Date().toLocaleDateString()}):`,"",...lines,"",
+    "Family notes: We have 3 kids age 5 and under who are picky about textures and don't like their food mixed together or touching. They like pork chops, pasta, chicken, Italian skillet and white rice. Please suggest meals where the kids' parts can be served separately and the adults can have it combined.",
+    "","Using mostly what we have, please suggest: "].join("\n");
+}
+async function copyStock(){
+  const text=stockText();
+  try{await navigator.clipboard.writeText(text);toast("Copied. Paste it into Claude and say what you'd like.");}
+  catch(e){
+    host.innerHTML=`<div class="sheet-bg" id="bg"><div class="sheet" role="dialog" aria-label="In-stock list"><h2>Copy this list</h2>
+      <p class="hint" style="margin:0">Press and hold in the box, choose Select All, then Copy.</p>
+      <div class="field"><textarea id="stockText" rows="12" readonly>${esc(text)}</textarea></div>
+      <div class="acts"><div class="right"><button type="button" class="btn" id="cancel">Done</button></div></div></div></div>`;
+    document.getElementById("cancel").onclick=closeSheet;
+    document.getElementById("bg").addEventListener("click",ev=>{if(ev.target.id==="bg")closeSheet()});
+    const ta=document.getElementById("stockText");ta.focus();ta.select();
+  }
 }
 
 /* ---------- sheets ---------- */
@@ -181,6 +206,7 @@ document.getElementById("signout").onclick=async()=>{await sb.auth.signOut();ite
 view.addEventListener("click",async e=>{
   const t=e.target.closest("button");if(!t)return;
   if(t.id==="switchMode"){const em=document.getElementById("email");if(em)userEmail=em.value;signupMode=!signupMode;render();return}
+  if("copystock" in t.dataset){copyStock();return}
   if(t.dataset.loc){loc=t.dataset.loc;saveUI();render();return}
   if(t.dataset.mealtype){mealType=t.dataset.mealtype;mealConfirm=null;saveUI();render();return}
   if(t.id==="needOnly"){needOnly=!needOnly;render();return}
@@ -229,6 +255,7 @@ async function enter(session){
   }
 }
 (async()=>{
+  const ver=document.getElementById("ver");if(ver)ver.textContent="Kitchen Hub version "+APP_VERSION;
   const cfg=window.KH_CONFIG||{};
   if(!cfg.supabaseUrl||/PASTE_/.test(cfg.supabaseUrl+cfg.supabaseAnonKey)||!window.supabase){phase="config";render();return}
   sb=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);
